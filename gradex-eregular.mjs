@@ -332,10 +332,25 @@ async function main() {
   log(bold('\n GradeX E-Regular — SRM e-Curricula submitter'));
   log(dim(' Runs the submission from YOUR network. Password/codes go to SRM only, never saved.\n'));
 
-  const baseIn = await ask(`GradeX base URL [${DEFAULT_BASE}]: `);
-  BASE = baseIn || DEFAULT_BASE;
-  TOKEN = await askHidden('GradeX account token (from the website — see README): ');
+  // A GradeX token is a JWT-ish string: starts with "ey", has dots, no spaces,
+  // and is long. People often paste it here (the very first prompt) instead of
+  // at the token prompt below — detect that and take it as the token, keeping
+  // the default base URL, so one wrong paste doesn't break the whole run.
+  const looksLikeToken = (s) => /^ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/.test(s) || (!/\s/.test(s) && s.length > 60 && (s.match(/\./g) || []).length >= 2 && !/^https?:\/\//i.test(s));
+  const baseIn = (await ask(`GradeX base URL [${DEFAULT_BASE}] — just press Enter: `)).trim();
+  if (looksLikeToken(baseIn)) {
+    log(dim('   (that looks like your token — using it, keeping the default URL)'));
+    BASE = DEFAULT_BASE;
+    TOKEN = baseIn;
+  } else {
+    if (!baseIn) BASE = DEFAULT_BASE;
+    else if (/^https?:\/\//i.test(baseIn)) BASE = baseIn.replace(/\/+$/, '');
+    else BASE = `https://${baseIn.replace(/\/+$/, '')}`; // bare host like "gradex.bond"
+    try { new URL(BASE); } catch { log(red(`   "${BASE}" isn't a valid URL — using ${DEFAULT_BASE}`)); BASE = DEFAULT_BASE; }
+    TOKEN = (await askHidden('GradeX account token (from the website — see README): ')).trim();
+  }
   if (!TOKEN) { err(red('No token given.')); rl.close(); return; }
+  if (/^https?:\/\//i.test(TOKEN)) { err(red('That looks like a URL, not a token. Get your token from the website (see README) and paste that.')); rl.close(); return; }
 
   let ra = '';
   while (!RA_RE.test(ra)) {
