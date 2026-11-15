@@ -22,7 +22,15 @@ What it does, for each unit you pick:
 ## 1. Requirements
 
 - **Node.js 18 or newer** — check with `node -v`. Install from <https://nodejs.org> if you don't have it.
-- No `npm install` needed. The tool uses only built-in Node.
+- No install needed. The tool uses only built-in Node.
+
+> **Quickest way to run it — no download:**
+> ```bash
+> npx gradex-eregular
+> ```
+> `npx` fetches and runs the latest version; answer the prompts and you're done.
+> The rest of this README (clone + `node gradex-eregular.mjs`) is only if you
+> prefer a local copy.
 
 ## 2. Get your GradeX account token
 
@@ -39,11 +47,11 @@ as you on GradeX.
 
 ## 3. Run it
 
-From this folder:
-
 ```bash
-node gradex-eregular.mjs
+npx gradex-eregular
 ```
+
+(or, from a local copy of this folder, `node gradex-eregular.mjs`).
 
 It will ask for, in order:
 
@@ -58,6 +66,31 @@ It will ask for, in order:
 
 Then pick a subject, pick the unit(s) (`1`, or `1-3`, or `all`), and choose
 whether to also auto-complete the in-portal MCQ / skill questions.
+
+### Skip the prompts (flags / env)
+
+Everything except the SRM password and the 6-digit codes can be passed up front,
+so it runs with almost no typing:
+
+```bash
+GRADEX_TOKEN=ey... npx gradex-eregular \
+  --ra RA23... --name "Full Name" --course 21ABC101 --units 1-2 --portal
+```
+
+| Flag | Meaning |
+|---|---|
+| `--token <t>` | GradeX token (or env `GRADEX_TOKEN`). |
+| `--base <url>` | GradeX base URL (or env `GRADEX_BASE`). |
+| `--ra <RA...>` | SRM registration number. |
+| `--name <name>` | Your full name. |
+| `--course <code>` | Subject code (skips the picker). |
+| `--units <spec>` | `1`, `1-3`, `1,3`, or `all`. |
+| `--portal` / `--no-portal` | Do / skip the in-portal questions. |
+| `-y`, `--yes` | Use defaults, don't pause. |
+| `-h`, `--help` · `-v`, `--version` | Help / version. |
+
+The **SRM password and the authenticator codes are always typed live** — never
+read from a flag, a file or the environment.
 
 ### About the 6-digit codes
 

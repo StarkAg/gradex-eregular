@@ -20,12 +20,22 @@
 // app's src/lib/deviceNet.js.
 //
 // REQUIREMENTS: Node 18+ (uses built-in fetch). No npm install needed.
-// RUN:  node gradex-eregular.mjs
+// RUN:  npx gradex-eregular        (or: node gradex-eregular.mjs)
+//
+// Everything can also be passed as a flag or environment variable, so it runs
+// unattended / scripted:
+//   npx gradex-eregular --ra RA23... --name "Full Name" --course 21ABC --units 1-2 --portal
+//   GRADEX_TOKEN=ey... npx gradex-eregular --ra RA23... --name "..." --units all
+// Flags: --token --base --ra --name --course --units --portal/--no-portal -y/--yes
+//        -h/--help  -v/--version. Env: GRADEX_TOKEN, GRADEX_BASE.
+// The SRM password and the 6-digit codes are always asked interactively and are
+// never read from a flag, a file or the environment.
 
 import readline from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 
 // ---- config ----------------------------------------------------------------
+const VERSION = '1.0.0';
 const DEFAULT_BASE = 'https://gradex.bond';
 const ALLOWED_HOSTS = new Set(['sp.srmist.edu.in', 'dld.srmist.edu.in']);
 const SKIPPED_HEADERS = new Set(['host', 'content-length', 'connection', 'accept-encoding']);
@@ -37,6 +47,40 @@ const RA_RE = /^[A-Za-z]{2}\d{13,15}$/; // RA2311... style
 
 let BASE = DEFAULT_BASE;
 let TOKEN = '';
+
+// ---- CLI args ---------------------------------------------------------------
+const ARGS = (() => {
+  const a = { _: [] };
+  const argv = process.argv.slice(2);
+  const alias = { h: 'help', v: 'version', y: 'yes' };
+  for (let i = 0; i < argv.length; i += 1) {
+    let t = argv[i];
+    if (t === '--') { a._.push(...argv.slice(i + 1)); break; }
+    if (t.startsWith('--')) {
+      let key = t.slice(2); let val;
+      const eq = key.indexOf('=');
+      if (eq !== -1) { val = key.slice(eq + 1); key = key.slice(0, eq); }
+      if (key.startsWith('no-')) { a[key.slice(3)] = false; continue; }
+      if (val === undefined) {
+        if (i + 1 < argv.length && !argv[i + 1].startsWith('-')) val = argv[++i];
+        else val = true;
+      }
+      a[key] = val;
+    } else if (t.startsWith('-') && t.length > 1) {
+      for (const ch of t.slice(1)) a[alias[ch] || ch] = true;
+    } else a._.push(t);
+  }
+  return a;
+})();
+
+// A GradeX token can arrive wrapped in quotes or with a leading "Bearer " — the
+// two shapes people most often paste by accident. Strip them.
+function cleanToken(s) {
+  let t = String(s == null ? '' : s).trim();
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) t = t.slice(1, -1).trim();
+  t = t.replace(/^Bearer\s+/i, '').trim();
+  return t;
+}
 
 // ---- tiny prompt helpers ----------------------------------------------------
 const rl = readline.createInterface({ input, output });
@@ -328,36 +372,73 @@ function parseUnits(spec, max = 5) {
   return [...out].sort((x, y) => x - y);
 }
 
+const HELP = `
+GradeX E-Regular — submit SRM e-Curricula ("e-regular") from your own network.
+
+Usage:
+  npx gradex-eregular                 interactive (asks for everything)
+  npx gradex-eregular --ra RA23... --name "Full Name" --units 1-2 --portal
+
+Options:
+  --token <t>     GradeX account token (or env GRADEX_TOKEN). Asked if omitted.
+  --base <url>    GradeX base URL (or env GRADEX_BASE). Default ${DEFAULT_BASE}
+  --ra <RA...>    Your SRM registration number.
+  --name <name>   Your full name (printed on the worksheets).
+  --course <code> Subject code to run (skips the subject picker).
+  --units <spec>  Units: e.g. 1, 1-3, 1,3, or all.
+  --portal        Also auto-complete the in-portal MCQ / skill questions.
+  --no-portal     Skip the in-portal questions (no prompt).
+  -y, --yes       Don't pause for confirmations; use defaults.
+  -h, --help      Show this help.
+  -v, --version   Show the version.
+
+Your SRM password and the 6-digit authenticator codes are always typed
+interactively — never read from a flag, a file or the environment.
+`;
+
 async function main() {
+  if (ARGS.help) { log(HELP); rl.close(); return; }
+  if (ARGS.version) { log(VERSION); rl.close(); return; }
+
   log(bold('\n GradeX E-Regular — SRM e-Curricula submitter'));
   log(dim(' Runs the submission from YOUR network. Password/codes go to SRM only, never saved.\n'));
 
-  // A GradeX token is a JWT-ish string: starts with "ey", has dots, no spaces,
-  // and is long. People often paste it here (the very first prompt) instead of
-  // at the token prompt below — detect that and take it as the token, keeping
-  // the default base URL, so one wrong paste doesn't break the whole run.
-  const looksLikeToken = (s) => /^ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/.test(s) || (!/\s/.test(s) && s.length > 60 && (s.match(/\./g) || []).length >= 2 && !/^https?:\/\//i.test(s));
-  const baseIn = (await ask(`GradeX base URL [${DEFAULT_BASE}] — just press Enter: `)).trim();
-  if (looksLikeToken(baseIn)) {
-    log(dim('   (that looks like your token — using it, keeping the default URL)'));
-    BASE = DEFAULT_BASE;
-    TOKEN = baseIn;
-  } else {
-    if (!baseIn) BASE = DEFAULT_BASE;
-    else if (/^https?:\/\//i.test(baseIn)) BASE = baseIn.replace(/\/+$/, '');
-    else BASE = `https://${baseIn.replace(/\/+$/, '')}`; // bare host like "gradex.bond"
+  // Base URL: flag / env / default.
+  const baseArg = (typeof ARGS.base === 'string' && ARGS.base) || process.env.GRADEX_BASE || '';
+  if (baseArg) {
+    BASE = /^https?:\/\//i.test(baseArg) ? baseArg.replace(/\/+$/, '') : `https://${baseArg.replace(/\/+$/, '')}`;
     try { new URL(BASE); } catch { log(red(`   "${BASE}" isn't a valid URL — using ${DEFAULT_BASE}`)); BASE = DEFAULT_BASE; }
-    TOKEN = (await askHidden('GradeX account token (from the website — see README): ')).trim();
   }
+
+  // Token: flag / env / prompt. A GradeX token is a JWT-ish string: starts with
+  // "ey", has dots, no spaces, and is long. People often paste it at the first
+  // prompt (the base URL) instead of the token prompt — detect that and take it
+  // as the token, so one wrong paste doesn't break the whole run.
+  const looksLikeToken = (s) => /^ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/.test(s) || (!/\s/.test(s) && s.length > 60 && (s.match(/\./g) || []).length >= 2 && !/^https?:\/\//i.test(s));
+  TOKEN = cleanToken((typeof ARGS.token === 'string' && ARGS.token) || process.env.GRADEX_TOKEN || '');
+  if (!TOKEN && !baseArg) {
+    const baseIn = (await ask(`GradeX base URL [${DEFAULT_BASE}] — just press Enter: `)).trim();
+    if (looksLikeToken(baseIn)) {
+      log(dim('   (that looks like your token — using it, keeping the default URL)'));
+      BASE = DEFAULT_BASE; TOKEN = cleanToken(baseIn);
+    } else {
+      if (!baseIn) BASE = DEFAULT_BASE;
+      else if (/^https?:\/\//i.test(baseIn)) BASE = baseIn.replace(/\/+$/, '');
+      else BASE = `https://${baseIn.replace(/\/+$/, '')}`; // bare host like "gradex.bond"
+      try { new URL(BASE); } catch { log(red(`   "${BASE}" isn't a valid URL — using ${DEFAULT_BASE}`)); BASE = DEFAULT_BASE; }
+    }
+  }
+  if (!TOKEN) TOKEN = cleanToken(await askHidden('GradeX account token (from the website — see README): '));
   if (!TOKEN) { err(red('No token given.')); rl.close(); return; }
   if (/^https?:\/\//i.test(TOKEN)) { err(red('That looks like a URL, not a token. Get your token from the website (see README) and paste that.')); rl.close(); return; }
 
-  let ra = '';
+  let ra = String(ARGS.ra || '').trim().toUpperCase();
+  if (ra && !RA_RE.test(ra)) { log(red(`"${ra}" does not look like an RA number — ask again.`)); ra = ''; }
   while (!RA_RE.test(ra)) {
     ra = (await ask('Your SRM registration number (e.g. RA23...): ')).trim().toUpperCase();
     if (!RA_RE.test(ra)) log(red('That does not look like an RA number.'));
   }
-  const name = await ask('Your full name (printed on the worksheets): ');
+  const name = (typeof ARGS.name === 'string' && ARGS.name.trim()) || await ask('Your full name (printed on the worksheets): ');
   const student = { ra, name, date: new Date().toISOString().slice(0, 10) };
 
   try {
@@ -365,16 +446,27 @@ async function main() {
     const courses = await listCourses();
     log(bold('\n== Your subjects =='));
     courses.forEach((c, i) => log(`  ${String(i + 1).padStart(2)}. ${c.code}  ${dim(c.name || '')}${c.semester ? dim(`  (sem ${c.semester})`) : ''}`));
-    let pick = NaN;
-    while (!(pick >= 1 && pick <= courses.length)) {
-      pick = Number(await ask('\nPick a subject number: '));
+
+    // Course: --course <code> (matched case-insensitively), else pick.
+    let course;
+    const courseArg = String(ARGS.course || '').trim().toUpperCase();
+    if (courseArg) {
+      const hit = courses.find((c) => String(c.code || '').toUpperCase() === courseArg);
+      if (!hit) { err(red(`--course ${courseArg} is not one of your enrolled subjects.`)); rl.close(); return; }
+      course = hit.code; log(dim(`   using --course ${course}`));
+    } else {
+      let pick = NaN;
+      while (!(pick >= 1 && pick <= courses.length)) pick = Number(await ask('\nPick a subject number: '));
+      course = courses[pick - 1].code;
     }
-    const course = courses[pick - 1].code;
-    const unitSpec = await ask('Which unit(s)? (e.g. 1, or 1-3, or "all"): ');
+
+    const unitSpec = (typeof ARGS.units === 'string' && ARGS.units) || await ask('Which unit(s)? (e.g. 1, or 1-3, or "all"): ');
     const units = parseUnits(unitSpec);
     if (units.length === 0) { err(red('No valid units.')); rl.close(); return; }
 
-    const doPortal = /^y/i.test(await ask('Also auto-complete in-portal MCQ / skill questions after each unit? [y/N]: ') || 'n');
+    const doPortal = typeof ARGS.portal === 'boolean' ? ARGS.portal
+      : ARGS.yes ? false
+      : /^y/i.test(await ask('Also auto-complete in-portal MCQ / skill questions after each unit? [y/N]: ') || 'n');
 
     for (const unit of units) {
       log(bold(`\n──────── ${course}  ·  Unit ${unit} ────────`));

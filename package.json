@@ -1,10 +1,31 @@
 {
   "name": "gradex-eregular",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
   "description": "Submit SRM e-Curricula (e-regular) worksheets and in-portal questions from your own laptop, using GradeX as the solver.",
   "bin": { "gradex-eregular": "gradex-eregular.mjs" },
   "scripts": { "start": "node gradex-eregular.mjs" },
-  "engines": { "node": ">=18" }
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "keywords": [
+    "gradex",
+    "srm",
+    "e-curricula",
+    "e-regular",
+    "ecurricula",
+    "srmist",
+    "cli"
+  ],
+  "homepage": "https://github.com/StarkAg/gradex-eregular#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StarkAg/gradex-eregular.git"
+  },
+  "bugs": { "url": "https://github.com/StarkAg/gradex-eregular/issues" },
+  "files": [
+    "gradex-eregular.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "preferGlobal": true
 }
