@@ -1,0 +1,10 @@
+{
+  "name": "gradex-eregular",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Submit SRM e-Curricula (e-regular) worksheets and in-portal questions from your own laptop, using GradeX as the solver.",
+  "bin": { "gradex-eregular": "gradex-eregular.mjs" },
+  "scripts": { "start": "node gradex-eregular.mjs" },
+  "engines": { "node": ">=18" }
+}
